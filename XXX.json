@@ -1,0 +1,8 @@
+{
+  "name": "XXX",
+  "description": "This Repo Contains NSFW Content!",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/owencz1998/XXX/builds/plugins.json"
+  ]
+}
