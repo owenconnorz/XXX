@@ -1,4 +1,4 @@
-package com.owencz1998
+package com.Pornhub
 
 import android.util.Log
 import org.jsoup.nodes.Element
@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.network.WebViewResolver
 import com.lagradost.cloudstream3.utils.newExtractorLink
@@ -13,10 +14,10 @@ import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.getQualityFromName
 import org.json.JSONObject
 
-class PornHubProvider : MainAPI() {
+class CornHubProvider : MainAPI() {
     private val globalTvType = TvType.NSFW
     override var mainUrl              = "https://www.pornhub.com"
-    override var name                 = "PornHub"
+    override var name                 = "CornHub"
     override val hasMainPage          = true
     override var lang                 = "en"
     override val hasQuickSearch       = false
@@ -25,7 +26,7 @@ class PornHubProvider : MainAPI() {
     override val supportedTypes       = setOf(TvType.NSFW)
     override val vpnStatus            = VPNStatus.MightBeNeeded
 
-    override val mainPage = mainPageOf(
+        override val mainPage = mainPageOf(
         "${mainUrl}/video?o=mr&hd=1&page="           to "Recently Featured",
         "${mainUrl}/video?o=tr&t=w&hd=1&page="       to "Top Rated",
         "${mainUrl}/video?o=mv&t=w&hd=1&page="       to "Most Viewed",
@@ -45,7 +46,6 @@ class PornHubProvider : MainAPI() {
         "${mainUrl}/video?c=7&page="                 to "Big Dick",
         "${mainUrl}/video?c=8&page="                 to "Big Tits",
         "${mainUrl}/video?c=13&page="                to "Blowjob",
-                       
     )
     private val cookies = mapOf(Pair("hasVisited", "1"), Pair("accessAgeDisclaimerPH", "1"))
 
@@ -62,13 +62,14 @@ class PornHubProvider : MainAPI() {
                 val title = it.selectFirst("span.title a")?.text() ?: ""
                 val link = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
                 val img = fetchImgUrl(it.selectFirst("img"))
-                MovieSearchResponse(
+                newMovieSearchResponse(
                     name = title,
                     url = link,
-                    apiName = this.name,
                     type = globalTvType,
-                    posterUrl = img
-                )
+
+                ){
+                    this.posterUrl = img
+                }
             }
             if (home.isNotEmpty()) {
                 return newHomePageResponse(
@@ -95,13 +96,14 @@ class PornHubProvider : MainAPI() {
             val title = it.selectFirst("span.title a")?.text() ?: return@mapNotNull null
             val link = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
             val image = fetchImgUrl(it.selectFirst("img"))
-            MovieSearchResponse(
+            newMovieSearchResponse(
                 name = title,
                 url = link,
-                apiName = this.name,
                 type = globalTvType,
-                posterUrl = image
-            )
+
+            ){
+                this.posterUrl = image
+            }
         }.distinctBy { it.url }
     }
 
@@ -113,30 +115,20 @@ class PornHubProvider : MainAPI() {
         val tags = soup.select("div.categoriesWrapper a")
             .map { it?.text()?.trim().toString().replace(", ", "") }
 
-        val recommendations = soup.select("ul#recommendedVideos li.pcVideoListItem").map {
-            val rTitle = it.selectFirst("div.phimage a")?.attr("title") ?: ""
-            val rUrl = fixUrl(it.selectFirst("div.phimage a")?.attr("href").toString())
-            val rPoster = fixUrl(
-                it.selectFirst("div.phimage img.js-videoThumb")?.attr("src").toString()
-            )
-            MovieSearchResponse(
-                name = rTitle, apiName = this.name, url = rUrl, posterUrl = rPoster
-            )
-        }
-
         val actors =
             soup.select("div.video-wrapper div.video-info-row.userRow div.userInfo div.usernameWrap a")
                 .map { it.text() }
 
-        val relatedVideo = soup.select("ul#relatedVideosCenter li.pcVideoListItem").map {
+        val relatedVideo = soup.select("li.fixedSizeThumbContainer").map {
             val rTitle = it.selectFirst("div.phimage a")?.attr("title") ?: ""
             val rUrl = fixUrl(it.selectFirst("div.phimage a")?.attr("href").toString())
             val rPoster = fixUrl(
                 it.selectFirst("div.phimage img.js-videoThumb")?.attr("src").toString()
             )
-            MovieSearchResponse(
-                name = rTitle, apiName = this.name, url = rUrl, posterUrl = rPoster
-            )
+            newMovieSearchResponse(name = rTitle, url = rUrl){
+                this.posterUrl = rPoster
+
+            }
         }
 
         return newMovieLoadResponse(title, url, TvType.NSFW, url) {
@@ -144,7 +136,7 @@ class PornHubProvider : MainAPI() {
             this.plot = title
             this.tags = tags
             addActors(actors)
-            this.recommendations = recommendations + relatedVideo
+            this.recommendations = relatedVideo
         }
     }
 
@@ -160,7 +152,7 @@ class PornHubProvider : MainAPI() {
         val document = request.document
         val mediaDefinitions = JSONObject(
             document.selectXpath("//script[contains(text(),'flashvars')]").first()?.data()
-                ?.substringAfter("=")?.substringBefore(";")
+                ?.substringAfter("=")?.substringBefore(";") ?: ""
         ).getJSONArray("mediaDefinitions")
 
         for (i in 0 until mediaDefinitions.length()) {
@@ -172,17 +164,17 @@ class PornHubProvider : MainAPI() {
                     M3u8Helper.M3u8Stream(
                         videoUrl
                     ), true
-                ).apmap { stream ->
+                ).amap { stream ->
                     extlinkList.add(
                         newExtractorLink(
                             source = name,
-                            name = "${this.name}",
+                            name = "${name}",
                             url = stream.streamUrl,
                             type = ExtractorLinkType.M3U8,
                         ) {
                             this.quality = Regex("(\\d+)").find(quality ?: "")?.groupValues?.get(1)
-                            .let { getQualityFromName(it) }
-                            this.referer = mainUrl
+                                .let { getQualityFromName(it) }
+                            referer = mainUrl
                         }
                     )
                 }
