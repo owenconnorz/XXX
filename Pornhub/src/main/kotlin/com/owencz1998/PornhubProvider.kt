@@ -46,7 +46,7 @@ class PornHubProvider : MainAPI() {
         "$mainUrl/video?c=27&page="                to "Lesbian",
         "$mainUrl/video?c=98&page="                to "Arab",
         "$mainUrl/video?c=1&page="                 to "Asian",
-        "$mainUrl/video?c=89$page="                to "Babysitter",
+        "$mainUrl/video?c=89&page="                to "Babysitter",
         "$mainUrl/video?c=6&page="                 to "BBW",
         "$mainUrl/video?c=141&page="               to "Behind The Scenes",
         "$mainUrl/video?c=4&page="                 to "Big Ass",
