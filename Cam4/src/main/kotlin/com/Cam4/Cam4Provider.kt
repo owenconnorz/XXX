@@ -1,5 +1,4 @@
-
- package com.Cam4
+package com.Cam4
  
  
  import android.net.Uri
