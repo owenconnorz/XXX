@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.getQualityFromName
 import org.json.JSONObject
+import java.net.URLEncoder
 
 class PornHubProvider : MainAPI() {
     private val globalTvType = TvType.NSFW
@@ -23,11 +24,14 @@ class PornHubProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.NSFW)
     override val vpnStatus = VPNStatus.MightBeNeeded
 
+    private val UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
     private val cookies = mapOf(
         "hasVisited" to "1",
         "accessAgeDisclaimerPH" to "1"
     )
-    private val commonHeaders = mapOf("Referer" to mainUrl)
+    private val commonHeaders = mapOf("Referer" to mainUrl, "User-Agent" to UA)
 
     override val mainPage = mainPageOf(
         "$mainUrl/video?o=mr&hd=1&page="           to "Recently Featured",
@@ -52,64 +56,58 @@ class PornHubProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        try {
-            val pagedLink = if (page > 0) request.data + page else request.data
-            val soup = app.get(pagedLink, cookies = cookies, headers = commonHeaders).document
-            val home = soup.select("div.sectionWrapper div.wrap").mapNotNull {
-                val title = it.selectFirst("span.title a")?.text() ?: ""
-                val link = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-                val img = fetchImgUrl(it.selectFirst("img"))
-                newMovieSearchResponse(
-                    name = title,
-                    url = link,
-                    type = globalTvType,
-                ) {
-                    posterUrl = img
-                }
-            }
-            if (home.isEmpty()) throw ErrorLoadingException("No homepage data found!")
-            return newHomePageResponse(
-                HomePageList(request.name, home, isHorizontalImages = true),
-                hasNext = true
-            )
-        } catch (e: Exception) {
-            logError(e)
-            throw ErrorLoadingException()
+        val pagedLink = if (page > 0) request.data + page else request.data
+        val doc = app.get(pagedLink, cookies = cookies, headers = commonHeaders).document
+        val items = doc.select("div.sectionWrapper div.wrap").mapNotNull {
+            val title = it.selectFirst("span.title a")?.text() ?: return@mapNotNull null
+            val link = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
+            val img = fetchImgUrl(it.selectFirst("img"))
+            newMovieSearchResponse(title, link, globalTvType) { posterUrl = img }
         }
+        if (items.isEmpty()) throw ErrorLoadingException("No homepage data found.")
+        return newHomePageResponse(HomePageList(request.name, items, isHorizontalImages = true), hasNext = true)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/video/search?search=$query"
-        val document = app.get(url, cookies = cookies, headers = commonHeaders).document
-        return document.select("div.sectionWrapper div.wrap").mapNotNull {
-            val title = it.selectFirst("span.title a")?.text() ?: return@mapNotNull null
-            val link = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val image = fetchImgUrl(it.selectFirst("img"))
-            newMovieSearchResponse(
-                name = title,
-                url = link,
-                type = globalTvType,
-            ) { posterUrl = image }
-        }.distinctBy { it.url }
+        val q = URLEncoder.encode(query, "UTF-8")
+        val out = mutableListOf<SearchResponse>()
+        for (page in 1..3) {
+            val url = "$mainUrl/video/search?search=$q&page=$page"
+            val doc = app.get(url, cookies = cookies, headers = commonHeaders).document
+            val cards = doc.select("li.pcVideoListItem, li.videoBox, div.sectionWrapper div.wrap")
+            if (cards.isEmpty()) break
+            cards.forEach { el ->
+                val a = el.selectFirst("a[href][title], a[href][data-title], a[href].js-link") ?: return@forEach
+                val href = fixUrlNull(a.attr("href")) ?: return@forEach
+                val title = a.attr("title").ifBlank { a.attr("data-title") }.ifBlank { a.text().trim() }
+                val imgEl = el.selectFirst("img[data-thumb_url], img[data-mediumthumb], img[data-src], img[src]")
+                val poster = imgEl?.attr("data-thumb_url")
+                    ?: imgEl?.attr("data-mediumthumb")
+                    ?: imgEl?.attr("data-src")
+                    ?: imgEl?.attr("src")
+                out += newMovieSearchResponse(title, href, globalTvType) { posterUrl = fixUrlNull(poster) }
+            }
+        }
+        if (out.isEmpty()) throw ErrorLoadingException("No search results.")
+        return out.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val soup = app.get(url, cookies = cookies, headers = commonHeaders).document
-        val title = soup.selectFirst(".title span")?.text() ?: ""
-        val poster: String? = soup.selectFirst("div.video-wrapper .mainPlayerDiv img")?.attr("src")
-            ?: soup.selectFirst("head meta[property=og:image]")?.attr("content")
-        val tags = soup.select("div.categoriesWrapper a")
-            .map { it.text().trim().replace(", ", "") }
-
-        val actors = soup
+        val doc = app.get(url, cookies = cookies, headers = commonHeaders).document
+        val title = doc.selectFirst(".title span")?.text()
+            ?: doc.selectFirst("meta[property=og:title]")?.attr("content").orEmpty()
+        val poster: String? = doc.selectFirst("div.video-wrapper .mainPlayerDiv img")?.attr("src")
+            ?: doc.selectFirst("head meta[property=og:image]")?.attr("content")
+        val tags = doc.select("div.categoriesWrapper a").map { it.text().trim().replace(", ", "") }
+        val actors = doc
             .select("div.video-wrapper div.video-info-row.userRow div.userInfo div.usernameWrap a")
             .map { it.text() }
 
-        val related = soup.select("li.fixedSizeThumbContainer").map {
+        val related = doc.select("li.fixedSizeThumbContainer").map {
             val rTitle = it.selectFirst("div.phimage a")?.attr("title") ?: ""
             val rUrl = fixUrl(it.selectFirst("div.phimage a")?.attr("href").toString())
             val rPoster = fixUrl(it.selectFirst("div.phimage img.js-videoThumb")?.attr("src").toString())
-            newMovieSearchResponse(name = rTitle, url = rUrl) { posterUrl = rPoster }
+            newMovieSearchResponse(rTitle, rUrl) { posterUrl = rPoster }
         }
 
         return newMovieLoadResponse(title, url, TvType.NSFW, url) {
@@ -127,15 +125,13 @@ class PornHubProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(data, cookies = cookies, headers = commonHeaders).document
+        val doc = app.get(url = data, cookies = cookies, headers = commonHeaders).document
 
-        // Try modern player first
         val scriptsJoined = doc.select("script").joinToString("\n") { it.data() }
         val mediaArrayStr =
             Regex("\"mediaDefinitions\"\\s*:\\s*(\\[.*?\\])", RegexOption.DOT_MATCHES_ALL)
                 .find(scriptsJoined)?.groupValues?.get(1)
                 ?: run {
-                    // Fallback to legacy flashvars JSON
                     val legacy = doc.selectXpath("//script[contains(text(),'flashvars')]")
                         .firstOrNull()?.data()
                         ?.substringAfter("=")?.substringBefore(";")
@@ -144,7 +140,6 @@ class PornHubProvider : MainAPI() {
                         JSONObject(legacy).optJSONArray("mediaDefinitions")?.toString()
                     else null
                 }
-
         if (mediaArrayStr.isNullOrEmpty()) return false
 
         val mediaDefinitions = org.json.JSONArray(mediaArrayStr)
@@ -153,7 +148,6 @@ class PornHubProvider : MainAPI() {
             var mUrl = obj.optString("videoUrl")
             if (mUrl.isNullOrEmpty()) continue
 
-            // Handle JSON indirection
             if (mUrl.endsWith(".json")) {
                 runCatching {
                     val j = JSONObject(app.get(mUrl, headers = commonHeaders).text)
@@ -161,23 +155,20 @@ class PornHubProvider : MainAPI() {
                 }
             }
 
-            val qualityStr = obj.optString("quality")
-            val extlinkList = mutableListOf<ExtractorLink>()
+            val qStr = obj.optString("quality")
+            val links = mutableListOf<ExtractorLink>()
             M3u8Helper().m3u8Generation(M3u8Helper.M3u8Stream(mUrl), true).amap { stream ->
-                extlinkList.add(
-                    newExtractorLink(
-                        source = name,
-                        name = name,
-                        url = stream.streamUrl,
-                        type = ExtractorLinkType.M3U8,
-                    ) {
-                        this.quality = Regex("(\\d+)").find(qualityStr)?.groupValues?.getOrNull(1)
-                            .let { getQualityFromName(it) }
-                        referer = mainUrl
-                    }
-                )
+                links += newExtractorLink(
+                    source = name,
+                    name = name,
+                    url = stream.streamUrl,
+                    type = ExtractorLinkType.M3U8,
+                ) {
+                    quality = getQualityFromName(Regex("(\\d+)").find(qStr)?.groupValues?.getOrNull(1))
+                    referer = mainUrl
+                }
             }
-            extlinkList.forEach(callback)
+            links.forEach(callback)
         }
         return true
     }
