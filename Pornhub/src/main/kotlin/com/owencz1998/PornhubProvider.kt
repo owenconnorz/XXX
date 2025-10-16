@@ -13,15 +13,15 @@ import org.json.JSONObject
 
 class PornHubProvider : MainAPI() {
     private val globalTvType = TvType.NSFW
-    override var mainUrl              = "https://www.pornhub.com"
-    override var name                 = "PornHub"
-    override val hasMainPage          = true
-    override var lang                 = "en"
-    override val hasQuickSearch       = false
-    override val hasDownloadSupport   = true
+    override var mainUrl = "https://www.pornhub.com"
+    override var name = "PornHub"
+    override val hasMainPage = true
+    override var lang = "en"
+    override val hasQuickSearch = false
+    override val hasDownloadSupport = true
     override val hasChromecastSupport = true
-    override val supportedTypes       = setOf(TvType.NSFW)
-    override val vpnStatus            = VPNStatus.MightBeNeeded
+    override val supportedTypes = setOf(TvType.NSFW)
+    override val vpnStatus = VPNStatus.MightBeNeeded
 
     private val cookies = mapOf(
         "hasVisited" to "1",
@@ -53,9 +53,7 @@ class PornHubProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         try {
-            val categoryData = request.data
-            val categoryName = request.name
-            val pagedLink = if (page > 0) categoryData + page else categoryData
+            val pagedLink = if (page > 0) request.data + page else request.data
             val soup = app.get(pagedLink, cookies = cookies, headers = commonHeaders).document
             val home = soup.select("div.sectionWrapper div.wrap").mapNotNull {
                 val title = it.selectFirst("span.title a")?.text() ?: ""
@@ -66,26 +64,22 @@ class PornHubProvider : MainAPI() {
                     url = link,
                     type = globalTvType,
                 ) {
-                    this.posterUrl = img
+                    posterUrl = img
                 }
             }
-            if (home.isNotEmpty()) {
-                return newHomePageResponse(
-                    list = HomePageList(
-                        name = categoryName, list = home, isHorizontalImages = true
-                    ), hasNext = true
-                )
-            } else {
-                throw ErrorLoadingException("No homepage data found!")
-            }
+            if (home.isEmpty()) throw ErrorLoadingException("No homepage data found!")
+            return newHomePageResponse(
+                HomePageList(request.name, home, isHorizontalImages = true),
+                hasNext = true
+            )
         } catch (e: Exception) {
             logError(e)
+            throw ErrorLoadingException()
         }
-        throw ErrorLoadingException()
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/video/search?search=${query}"
+        val url = "$mainUrl/video/search?search=$query"
         val document = app.get(url, cookies = cookies, headers = commonHeaders).document
         return document.select("div.sectionWrapper div.wrap").mapNotNull {
             val title = it.selectFirst("span.title a")?.text() ?: return@mapNotNull null
@@ -95,9 +89,7 @@ class PornHubProvider : MainAPI() {
                 name = title,
                 url = link,
                 type = globalTvType,
-            ) {
-                this.posterUrl = image
-            }
+            ) { posterUrl = image }
         }.distinctBy { it.url }
     }
 
@@ -107,29 +99,25 @@ class PornHubProvider : MainAPI() {
         val poster: String? = soup.selectFirst("div.video-wrapper .mainPlayerDiv img")?.attr("src")
             ?: soup.selectFirst("head meta[property=og:image]")?.attr("content")
         val tags = soup.select("div.categoriesWrapper a")
-            .map { it?.text()?.trim().toString().replace(", ", "") }
+            .map { it.text().trim().replace(", ", "") }
 
-        val actors =
-            soup.select("div.video-wrapper div.video-info-row.userRow div.userInfo div.usernameWrap a")
-                .map { it.text() }
+        val actors = soup
+            .select("div.video-wrapper div.video-info-row.userRow div.userInfo div.usernameWrap a")
+            .map { it.text() }
 
-        val relatedVideo = soup.select("li.fixedSizeThumbContainer").map {
+        val related = soup.select("li.fixedSizeThumbContainer").map {
             val rTitle = it.selectFirst("div.phimage a")?.attr("title") ?: ""
             val rUrl = fixUrl(it.selectFirst("div.phimage a")?.attr("href").toString())
-            val rPoster = fixUrl(
-                it.selectFirst("div.phimage img.js-videoThumb")?.attr("src").toString()
-            )
-            newMovieSearchResponse(name = rTitle, url = rUrl) {
-                this.posterUrl = rPoster
-            }
+            val rPoster = fixUrl(it.selectFirst("div.phimage img.js-videoThumb")?.attr("src").toString())
+            newMovieSearchResponse(name = rTitle, url = rUrl) { posterUrl = rPoster }
         }
 
         return newMovieLoadResponse(title, url, TvType.NSFW, url) {
-            this.posterUrl = poster
-            this.plot = title
+            posterUrl = poster
+            plot = title
             this.tags = tags
             addActors(actors)
-            this.recommendations = relatedVideo
+            recommendations = related
         }
     }
 
@@ -139,15 +127,15 @@ class PornHubProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(url = data, cookies = cookies, headers = commonHeaders).document
+        val doc = app.get(data, cookies = cookies, headers = commonHeaders).document
 
-        // 1) Try modern player: scan scripts for "mediaDefinitions"
+        // Try modern player first
         val scriptsJoined = doc.select("script").joinToString("\n") { it.data() }
         val mediaArrayStr =
             Regex("\"mediaDefinitions\"\\s*:\\s*(\\[.*?\\])", RegexOption.DOT_MATCHES_ALL)
                 .find(scriptsJoined)?.groupValues?.get(1)
                 ?: run {
-                    // 2) Fallback to legacy flashvars JSON
+                    // Fallback to legacy flashvars JSON
                     val legacy = doc.selectXpath("//script[contains(text(),'flashvars')]")
                         .firstOrNull()?.data()
                         ?.substringAfter("=")?.substringBefore(";")
@@ -165,7 +153,7 @@ class PornHubProvider : MainAPI() {
             var mUrl = obj.optString("videoUrl")
             if (mUrl.isNullOrEmpty()) continue
 
-            // Some entries are JSON indirections
+            // Handle JSON indirection
             if (mUrl.endsWith(".json")) {
                 runCatching {
                     val j = JSONObject(app.get(mUrl, headers = commonHeaders).text)
@@ -183,7 +171,7 @@ class PornHubProvider : MainAPI() {
                         url = stream.streamUrl,
                         type = ExtractorLinkType.M3U8,
                     ) {
-                        this.quality = Regex("(\\d+)").find(qualityStr ?: "")?.groupValues?.getOrNull(1)
+                        this.quality = Regex("(\\d+)").find(qualityStr)?.groupValues?.getOrNull(1)
                             .let { getQualityFromName(it) }
                         referer = mainUrl
                     }
@@ -191,16 +179,16 @@ class PornHubProvider : MainAPI() {
             }
             extlinkList.forEach(callback)
         }
-
         return true
     }
 
-    private fun fetchImgUrl(imgsrc: Element?): String? {
-        return try {
-            imgsrc?.attr("src") ?: imgsrc?.attr("data-src") ?: imgsrc?.attr("data-mediabook")
-                ?: imgsrc?.attr("alt") ?: imgsrc?.attr("data-mediumthumb")
-                ?: imgsrc?.attr("data-thumb_url")
-        } catch (e: Exception) {
-            null
-        }
-    }
+    private fun fetchImgUrl(img: Element?): String? =
+        try {
+            img?.attr("src")
+                ?: img?.attr("data-src")
+                ?: img?.attr("data-mediabook")
+                ?: img?.attr("alt")
+                ?: img?.attr("data-mediumthumb")
+                ?: img?.attr("data-thumb_url")
+        } catch (_: Exception) { null }
+}
