@@ -29,65 +29,71 @@ class PornHubProvider : MainAPI() {
 
     private val cookies = mapOf(
         "hasVisited" to "1",
-        "accessAgeDisclaimerPH" to "1"
+        "accessAgeDisclaimerPH" to "1",
+        "platform" to "pc"
     )
-    private val commonHeaders = mapOf("Referer" to mainUrl, "User-Agent" to UA)
+
+    private val htmlHeaders = mapOf(
+        "Referer" to mainUrl,
+        "User-Agent" to UA,
+        "X-Requested-With" to "XMLHttpRequest",
+        "Accept" to "text/html"
+    )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/video?o=mr&hd=1&page="           to "Recently Featured",
-        "$mainUrl/video?o=tr&t=w&hd=1&page="       to "Top Rated",
-        "$mainUrl/video?o=mv&t=w&hd=1&page="       to "Most Viewed",
-        "$mainUrl/video?o=ht&t=w&hd=1&page="       to "Hottest",
-        "$mainUrl/video?p=professional&hd=1&page=" to "Professional",
-        "$mainUrl/video?o=lg&hd=1&page="           to "Longest",
-        "$mainUrl/video?p=homemade&hd=1&page="     to "Homemade",
-        "$mainUrl/video?o=cm&t=w&hd=1&page="       to "Newest",
-        "$mainUrl/video?c=35&page="                to "Anal",
-        "$mainUrl/video?c=27&page="                to "Lesbian",
-        "$mainUrl/video?c=98&page="                to "Arab",
-        "$mainUrl/video?c=1&page="                 to "Asian",
-        "$mainUrl/video?c=89&page="                to "Babysitter",
-        "$mainUrl/video?c=6&page="                 to "BBW",
-        "$mainUrl/video?c=141&page="               to "Behind The Scenes",
-        "$mainUrl/video?c=4&page="                 to "Big Ass",
-        "$mainUrl/video?c=7&page="                 to "Big Dick",
-        "$mainUrl/video?c=8&page="                 to "Big Tits",
-        "$mainUrl/video?c=13&page="                to "Blowjob",
+        "$mainUrl/video?o=mr&hd=1&ajax=1&page="           to "Recently Featured",
+        "$mainUrl/video?o=tr&t=w&hd=1&ajax=1&page="       to "Top Rated",
+        "$mainUrl/video?o=mv&t=w&hd=1&ajax=1&page="       to "Most Viewed",
+        "$mainUrl/video?o=ht&t=w&hd=1&ajax=1&page="       to "Hottest",
+        "$mainUrl/video?p=professional&hd=1&ajax=1&page=" to "Professional",
+        "$mainUrl/video?o=lg&hd=1&ajax=1&page="           to "Longest",
+        "$mainUrl/video?p=homemade&hd=1&ajax=1&page="     to "Homemade",
+        "$mainUrl/video?o=cm&t=w&hd=1&ajax=1&page="       to "Newest",
+        "$mainUrl/video?c=35&ajax=1&page="                to "Anal",
+        "$mainUrl/video?c=27&ajax=1&page="                to "Lesbian",
+        "$mainUrl/video?c=98&ajax=1&page="                to "Arab",
+        "$mainUrl/video?c=1&ajax=1&page="                 to "Asian",
+        "$mainUrl/video?c=89&ajax=1&page="                to "Babysitter",
+        "$mainUrl/video?c=6&ajax=1&page="                 to "BBW",
+        "$mainUrl/video?c=141&ajax=1&page="               to "Behind The Scenes",
+        "$mainUrl/video?c=4&ajax=1&page="                 to "Big Ass",
+        "$mainUrl/video?c=7&ajax=1&page="                 to "Big Dick",
+        "$mainUrl/video?c=8&ajax=1&page="                 to "Big Tits",
+        "$mainUrl/video?c=13&ajax=1&page="                to "Blowjob",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val pagedLink = if (page > 0) request.data + page else request.data
-        val doc = app.get(pagedLink, cookies = cookies, headers = commonHeaders).document
+        val url = request.data + (if (page > 0) page else 1)
+        val doc = app.get(url, cookies = cookies, headers = htmlHeaders).document
 
-        val videos = doc.select("ul.videos li.videoBox, li.pcVideoListItem")
-        if (videos.isEmpty()) throw ErrorLoadingException("No homepage data found.")
+        val cards = doc.select("li.pcVideoListItem, li.videoBox, ul.videos li.videoBox")
+        if (cards.isEmpty()) throw ErrorLoadingException("No homepage data found.")
 
-        val home = videos.mapNotNull { el ->
-            val a = el.selectFirst("a[href][title], a[href][data-title], a[href].js-link")
-                ?: return@mapNotNull null
-            val link = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
+        val list = cards.mapNotNull { el ->
+            val a = el.selectFirst("a[href][title], a[href][data-title], a.js-link[href]") ?: return@mapNotNull null
+            val href = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
             val title = a.attr("title").ifBlank { a.attr("data-title") }.ifBlank { a.text().trim() }
             val imgEl = el.selectFirst("img[data-thumb_url], img[data-mediumthumb], img[data-src], img[src]")
             val poster = imgEl?.attr("data-thumb_url")
                 ?: imgEl?.attr("data-mediumthumb")
                 ?: imgEl?.attr("data-src")
                 ?: imgEl?.attr("src")
-            newMovieSearchResponse(title, link, globalTvType) { posterUrl = fixUrlNull(poster) }
+            newMovieSearchResponse(title, href, globalTvType) { posterUrl = fixUrlNull(poster) }
         }
 
-        return newHomePageResponse(HomePageList(request.name, home, isHorizontalImages = true), hasNext = true)
+        return newHomePageResponse(HomePageList(request.name, list, isHorizontalImages = true), hasNext = true)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val q = URLEncoder.encode(query, "UTF-8")
         val out = mutableListOf<SearchResponse>()
         for (page in 1..3) {
-            val url = "$mainUrl/video/search?search=$q&page=$page"
-            val doc = app.get(url, cookies = cookies, headers = commonHeaders).document
-            val cards = doc.select("li.pcVideoListItem, li.videoBox, ul.videos li.videoBox, div.sectionWrapper div.wrap")
+            val url = "$mainUrl/video/search?search=$q&ajax=1&page=$page"
+            val doc = app.get(url, cookies = cookies, headers = htmlHeaders).document
+            val cards = doc.select("li.pcVideoListItem, li.videoBox, ul.videos li.videoBox")
             if (cards.isEmpty()) break
             cards.forEach { el ->
-                val a = el.selectFirst("a[href][title], a[href][data-title], a[href].js-link") ?: return@forEach
+                val a = el.selectFirst("a[href][title], a[href][data-title], a.js-link[href]") ?: return@forEach
                 val href = fixUrlNull(a.attr("href")) ?: return@forEach
                 val title = a.attr("title").ifBlank { a.attr("data-title") }.ifBlank { a.text().trim() }
                 val imgEl = el.selectFirst("img[data-thumb_url], img[data-mediumthumb], img[data-src], img[src]")
@@ -103,7 +109,7 @@ class PornHubProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val doc = app.get(url, cookies = cookies, headers = commonHeaders).document
+        val doc = app.get(url, cookies = cookies, headers = mapOf("Referer" to mainUrl, "User-Agent" to UA)).document
         val title = doc.selectFirst(".title span")?.text()
             ?: doc.selectFirst("meta[property=og:title]")?.attr("content").orEmpty()
         val poster = fixUrlNull(
@@ -137,7 +143,7 @@ class PornHubProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val doc = app.get(url = data, cookies = cookies, headers = commonHeaders).document
+        val doc = app.get(url = data, cookies = cookies, headers = mapOf("Referer" to mainUrl, "User-Agent" to UA)).document
 
         val scriptsJoined = doc.select("script").joinToString("\n") { it.data() }
         val mediaArrayStr =
@@ -162,7 +168,7 @@ class PornHubProvider : MainAPI() {
 
             if (mUrl.endsWith(".json")) {
                 runCatching {
-                    val j = JSONObject(app.get(mUrl, headers = commonHeaders).text)
+                    val j = JSONObject(app.get(mUrl, headers = mapOf("User-Agent" to UA)).text)
                     mUrl = j.optString("videoUrl", mUrl)
                 }
             }
