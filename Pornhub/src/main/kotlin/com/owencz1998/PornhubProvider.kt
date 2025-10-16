@@ -6,9 +6,9 @@ import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
 import com.lagradost.cloudstream3.utils.getQualityFromName
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONObject
 import java.net.URLEncoder
 
@@ -46,7 +46,7 @@ class PornHubProvider : MainAPI() {
         "$mainUrl/video?c=27&page="                to "Lesbian",
         "$mainUrl/video?c=98&page="                to "Arab",
         "$mainUrl/video?c=1&page="                 to "Asian",
-        "$mainUrl/video?c=89&page="                to "Babysitter",
+        "$mainUrl/video?c=89$page="                to "Babysitter",
         "$mainUrl/video?c=6&page="                 to "BBW",
         "$mainUrl/video?c=141&page="               to "Behind The Scenes",
         "$mainUrl/video?c=4&page="                 to "Big Ass",
@@ -58,14 +58,24 @@ class PornHubProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val pagedLink = if (page > 0) request.data + page else request.data
         val doc = app.get(pagedLink, cookies = cookies, headers = commonHeaders).document
-        val items = doc.select("div.sectionWrapper div.wrap").mapNotNull {
-            val title = it.selectFirst("span.title a")?.text() ?: return@mapNotNull null
-            val link = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val img = fetchImgUrl(it.selectFirst("img"))
-            newMovieSearchResponse(title, link, globalTvType) { posterUrl = img }
+
+        val videos = doc.select("ul.videos li.videoBox, li.pcVideoListItem")
+        if (videos.isEmpty()) throw ErrorLoadingException("No homepage data found.")
+
+        val home = videos.mapNotNull { el ->
+            val a = el.selectFirst("a[href][title], a[href][data-title], a[href].js-link")
+                ?: return@mapNotNull null
+            val link = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
+            val title = a.attr("title").ifBlank { a.attr("data-title") }.ifBlank { a.text().trim() }
+            val imgEl = el.selectFirst("img[data-thumb_url], img[data-mediumthumb], img[data-src], img[src]")
+            val poster = imgEl?.attr("data-thumb_url")
+                ?: imgEl?.attr("data-mediumthumb")
+                ?: imgEl?.attr("data-src")
+                ?: imgEl?.attr("src")
+            newMovieSearchResponse(title, link, globalTvType) { posterUrl = fixUrlNull(poster) }
         }
-        if (items.isEmpty()) throw ErrorLoadingException("No homepage data found.")
-        return newHomePageResponse(HomePageList(request.name, items, isHorizontalImages = true), hasNext = true)
+
+        return newHomePageResponse(HomePageList(request.name, home, isHorizontalImages = true), hasNext = true)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -74,7 +84,7 @@ class PornHubProvider : MainAPI() {
         for (page in 1..3) {
             val url = "$mainUrl/video/search?search=$q&page=$page"
             val doc = app.get(url, cookies = cookies, headers = commonHeaders).document
-            val cards = doc.select("li.pcVideoListItem, li.videoBox, div.sectionWrapper div.wrap")
+            val cards = doc.select("li.pcVideoListItem, li.videoBox, ul.videos li.videoBox, div.sectionWrapper div.wrap")
             if (cards.isEmpty()) break
             cards.forEach { el ->
                 val a = el.selectFirst("a[href][title], a[href][data-title], a[href].js-link") ?: return@forEach
@@ -96,8 +106,10 @@ class PornHubProvider : MainAPI() {
         val doc = app.get(url, cookies = cookies, headers = commonHeaders).document
         val title = doc.selectFirst(".title span")?.text()
             ?: doc.selectFirst("meta[property=og:title]")?.attr("content").orEmpty()
-        val poster: String? = doc.selectFirst("div.video-wrapper .mainPlayerDiv img")?.attr("src")
-            ?: doc.selectFirst("head meta[property=og:image]")?.attr("content")
+        val poster = fixUrlNull(
+            doc.selectFirst("div.video-wrapper .mainPlayerDiv img")?.attr("src")
+                ?: doc.selectFirst("head meta[property=og:image]")?.attr("content")
+        )
         val tags = doc.select("div.categoriesWrapper a").map { it.text().trim().replace(", ", "") }
         val actors = doc
             .select("div.video-wrapper div.video-info-row.userRow div.userInfo div.usernameWrap a")
