@@ -1,7 +1,7 @@
 version = 1
 
 cloudstream {
-    authors     = listOf("luck731")
+    authors     = listOf("Owen Cz")
     language    = "en"
     description = "Watch & Chat with Sexy Webcam Girls Fucking, Fingering and Squirting Live on Cam - Chat with 750+ Hot Women Who Are Broadcasting & Wanking Now - Waiting for you."
 
