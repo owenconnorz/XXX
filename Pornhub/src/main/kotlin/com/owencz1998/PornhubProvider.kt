@@ -36,7 +36,7 @@ class PornHubProvider : MainAPI() {
         "$mainUrl/video?c=141&page="               to "Behind The Scenes",
         "$mainUrl/video?c=4&page="                 to "Big Ass",
         "$mainUrl/video?c=7&page="                 to "Big Dick",
-        "$mainUrl/video?c=8&page="                 to "Big Tits",
+        "$mainUrl/video?c=8$page="                 to "Big Tits",
         "$mainUrl/video?c=13&page="                to "Blowjob",
     )
 
@@ -57,9 +57,7 @@ class PornHubProvider : MainAPI() {
                 name = title,
                 url = link,
                 type = globalTvType
-            ) {
-                posterUrl = img
-            }
+            ) { posterUrl = img }
         }
         if (items.isEmpty()) throw ErrorLoadingException("No homepage data found.")
         return newHomePageResponse(
@@ -79,9 +77,7 @@ class PornHubProvider : MainAPI() {
                 name = title,
                 url = link,
                 type = globalTvType
-            ) {
-                posterUrl = img
-            }
+            ) { posterUrl = img }
         }.distinctBy { it.url }
     }
 
@@ -107,7 +103,7 @@ class PornHubProvider : MainAPI() {
             posterUrl = poster
             plot = title
             this.tags = tags
-            addActors(actors)
+            this.actors = actors.map { ActorData(it) }
             recommendations = recs
         }
     }
@@ -120,30 +116,33 @@ class PornHubProvider : MainAPI() {
     ): Boolean {
         val doc = app.get(data, cookies = cookies, headers = commonHeaders).document
 
-        // Try modern player data first
-        val playerData = doc.select("script")
+        // Parse modern player first
+        val playerBlock = doc.select("script")
             .map { it.data() }
-            .firstOrNull { it.contains("var player_", ignoreCase = true) || it.contains("\"mediaDefinitions\"") }
+            .firstOrNull { it.contains("\"mediaDefinitions\"") || it.contains("var player_") }
             ?: ""
 
-        val jsonStr = playerData
-            .substringAfter("\"mediaDefinitions\":", missingDelimiterValue = "")
+        val jsonStr = playerBlock
+            .substringAfter("\"mediaDefinitions\":", "")
             .let { s -> if (s.isNotEmpty()) s.substringBefore("]") + "]" else "" }
 
         val mediaDefs = if (jsonStr.isNotEmpty()) {
             JSONObject("""{"mediaDefinitions":$jsonStr}""").getJSONArray("mediaDefinitions")
         } else {
-            // Fallback to legacy flashvars block
-            val legacy = doc.selectXpath("//script[contains(text(),'flashvars')]").first()?.data()
-                ?.substringAfter("=")?.substringBefore(";").orEmpty()
+            // Fallback to legacy flashvars
+            val legacy = doc.selectXpath("//script[contains(text(),'flashvars')]").first()
+                ?.data()
+                ?.substringAfter("=")
+                ?.substringBefore(";")
+                .orEmpty()
             if (legacy.isNotEmpty()) JSONObject(legacy).getJSONArray("mediaDefinitions") else null
         } ?: return false
 
         for (i in 0 until mediaDefs.length()) {
             val obj = mediaDefs.getJSONObject(i)
-            val videoUrl = obj.optString("videoUrl").orEmpty()
-            if (videoUrl.isEmpty()) continue
-            // Some entries embed M3U8 directly, others point to a .m3u8 manifest list
+            val videoUrl = obj.optString("videoUrl")
+            if (videoUrl.isNullOrEmpty()) continue
+
             M3u8Helper().m3u8Generation(M3u8Helper.M3u8Stream(videoUrl), true).forEach { stream ->
                 callback(
                     newExtractorLink(
