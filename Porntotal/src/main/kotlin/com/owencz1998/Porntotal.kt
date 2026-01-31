@@ -1,182 +1,148 @@
-package com.owencz1998
+package com.PornTotal
 
-import com.lagradost.cloudstream3.HomePageList
-import com.lagradost.cloudstream3.HomePageResponse
-import com.lagradost.cloudstream3.LoadResponse
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.VPNStatus
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.fixUrl
-import com.lagradost.cloudstream3.fixUrlNull
-import com.lagradost.cloudstream3.mainPageOf
-import com.lagradost.cloudstream3.newHomePageResponse
-import com.lagradost.cloudstream3.newMovieLoadResponse
-import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.getQualityFromName
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import org.json.JSONObject
-import org.jsoup.internal.StringUtil
 import org.jsoup.nodes.Element
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.*
+import org.json.JSONObject
+import org.json.JSONArray
 
-class Porntrex : MainAPI() {
-    override var mainUrl = "https://www.porntrex.com"
-    override var name = "Porntrex"
-    override val hasMainPage = true
-    override val hasDownloadSupport = true
-    override val vpnStatus = VPNStatus.MightBeNeeded
-    override val supportedTypes = setOf(TvType.NSFW)
+class PornTotal : MainAPI() {
+    override var mainUrl              = "https://www.porntotal.com"
+    override var name                 = "PornTotal"
+    override val hasMainPage          = true
+    override var lang                 = "en"
+    override val hasQuickSearch       = false
+    override val hasDownloadSupport   = true
+    override val supportedTypes       = setOf(TvType.NSFW)
+    override val vpnStatus            = VPNStatus.MightBeNeeded
 
     override val mainPage = mainPageOf(
-            "latest-updates" to "Latest Videos",
-            "most-popular/daily/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=video_viewed_today&from4=" to "Most popular daily",
-            "top-rated/daily/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=rating_today&from4=" to "Top rated daily",
-            "most-popular/weekly/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=video_viewed_week&from4=" to "Most popular weekly",
-            "top-rated/weekly/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=rating_week&from4=" to "Top rated weekly",
-            "most-popular/monthly/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=video_viewed_month&from4=" to "Most popular monthly",
-            "top-rated/monthly/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=rating_month&from4=" to "Top rated monthly",
-            "most-popular/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=video_viewed&from4=" to "Most popular all time",
-            "top-rated/?mode=async&function=get_block&block_id=list_videos_common_videos_list_norm&sort_by=rating&from4=" to "Top rated all time",
+        "" to "Hottest New Videos",
+        "content" to "All Videos",
+        "content?category=anal" to "Anal",
+        "content?category=amateur" to "Amateur",
+        "content?category=asian" to "Asian",
+        "content?category=big-ass" to "Big Ass",
+        "content?category=big-tits" to "Big Tits",
+        "content?category=blowjob" to "Blowjob",
+        "content?category=creampie" to "Creampie",
+        "content?category=ebony" to "Ebony",
+        "content?category=latina" to "Latina",
+        "content?category=milf" to "MILF",
+        "content?category=teen" to "Teen",
+        "content?category=lesbian" to "Lesbian",
+        "content?category=bbw" to "BBW",
+        "content?category=mature" to "Mature",
+        "content?category=gangbang" to "Gangbang",
+        "content?category=interracial" to "Interracial",
+        "content?category=vr" to "VR",
+        "content?category=cosplay" to "Cosplay",
+        "content?category=cartoon" to "Cartoon",
+        "content?category=college" to "College",
+        "content?category=bisexual" to "Bisexual",
+        "content?category=pissing" to "Pissing",
+        // Add even more if needed
     )
 
-    override suspend fun getMainPage(
-            page: Int,
-            request: MainPageRequest
-    ): HomePageResponse {
-        var url: String
-        url = if (page == 1) {
-            "$mainUrl/${request.data}/"
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val data = request.data
+        val url = if (page == 1) {
+            if (data.isEmpty()) mainUrl else "$mainUrl/$data"
         } else {
-            "$mainUrl/${request.data}/${page}/"
-        }
-        if (request.data.contains("mode=async")) {
-            url = "$mainUrl/${request.data}${page}"
+            if (data.isEmpty()) {
+                "$mainUrl?page=$page"
+            } else if (data.contains("?")) {
+                "$mainUrl/$data&page=$page"
+            } else {
+                "$mainUrl/$data?page=$page"
+            }
         }
         val document = app.get(url).document
-        val home =
-                document.select("div.video-list div.video-item")
-                        .mapNotNull {
-                            it.toSearchResult()
-                        }
+        val items = document.select("a[href^='/video/']")
+        val home = items.chunked(2).mapNotNull { chunk ->
+            if (chunk.size < 2) return@mapNotNull null
+            val titleElem = chunk[1]
+            val title = titleElem.text().trim()
+            val href = fixUrl(titleElem.attr("href"))
+            val posterUrl: String? = null // No posters
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+            }
+        }
+
         return newHomePageResponse(
-                list = HomePageList(
-                        name = request.name,
-                        list = home,
-                        isHorizontalImages = true
-                ),
-                hasNext = true
+            HomePageList(
+                request.name,
+                home,
+                isHorizontalImages = true
+            ),
+            hasNext = home.isNotEmpty() // Assume has next if items present
         )
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val title = this.selectFirst("p.inf a")?.text() ?: return null
-        val href = fixUrl(this.selectFirst("p.inf a")!!.attr("href"))
-        val posterUrl = fixUrlNull(this.select("a.thumb img.cover").attr("data-src"))
-        return newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = posterUrl
-            this.posterHeaders = mapOf(Pair("referer", "${mainUrl}/"))
-        }
-
+        // Not used, but if needed
+        return null
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val searchResponse = mutableListOf<SearchResponse>()
-        for (i in 1..15) {
-            val url: String = if (i == 1) {
-                "$mainUrl/search/${query.replace(" ", "-")}/"
-            } else {
-                "$mainUrl/search/${query.replace(" ", "-")}/$i/"
-            }
-            val document =
-                    app.get(url).document
-            val results =
-                    document.select("div.video-list div.video-item")
-                            .mapNotNull {
-                                it.toSearchResult()
-                            }
-            searchResponse.addAll(results)
-            if (results.isEmpty()) break
-        }
-        return searchResponse
+        return emptyList() // No search
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
 
-        val jsonObject = JSONObject(document.selectXpath("//script[contains(text(),'var flashvars')]").first()?.data()
-                ?.substringAfter("var flashvars = ")
-                ?.substringBefore("var player_obj")
-                ?.replace(";", "") ?: "")
+        val title = document.selectFirst("meta[property=og:title]")?.attr("content") ?: ""
+        val poster = document.selectFirst("meta[property=og:image]")?.attr("content") ?: ""
+        val description = document.selectFirst("meta[property=og:description]")?.attr("content") ?: ""
 
-        val title = jsonObject.getString("video_title")
-        val poster =
-                fixUrlNull(jsonObject.getString("preview_url"))
-
-        val tags = jsonObject.getString("video_tags").split(", ").map { it.replace("-", "") }.filter { it.isNotBlank() && !StringUtil.isNumeric(it) }
-        val description = jsonObject.getString("video_title")
-
-        val recommendations =
-                document.select("div#list_videos_related_videos div.video-list div.video-item").mapNotNull {
-                    it.toSearchResult()
-                }
-
-        return newMovieLoadResponse(title, url, TvType.NSFW, url) {
+        return newMovieLoadResponse(title, url, TvType.Movie, url) {
             this.posterUrl = poster
-            this.posterHeaders = mapOf(Pair("referer", "${mainUrl}/"))
             this.plot = description
-            this.tags = tags
-            this.recommendations = recommendations
         }
     }
 
-    override suspend fun loadLinks(
-            data: String,
-            isCasting: Boolean,
-            subtitleCallback: (SubtitleFile) -> Unit,
-            callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val document = app.get(data).document
 
-        val jsonObject = JSONObject(document.selectXpath("//script[contains(text(),'var flashvars')]").first()?.data()
-                ?.substringAfter("var flashvars = ")
-                ?.substringBefore("var player_obj")
-                ?.replace(";", "") ?: "")
-        val extlinkList = mutableListOf<ExtractorLink>()
-        for (i in 0 until 7) {
-            var url: String
-            var quality: String
-            if (i == 0) {
-                url = jsonObject.optString("video_url") ?: ""
-                quality = jsonObject.optString("video_url_text") ?: ""
-            } else {
-                if (i == 1) {
-                    url = jsonObject.optString("video_alt_url") ?: ""
-                    quality = jsonObject.optString("video_alt_url_text") ?: ""
-                } else {
-                    url = jsonObject.optString("video_alt_url${i}") ?: ""
-                    quality = jsonObject.optString("video_alt_url${i}_text") ?: ""
+        val iframeSrc = document.selectFirst("iframe[src*=\"pornhub.com/embed\"]")?.attr("src") ?: return false
+
+        val embedDoc = app.get(iframeSrc, referer = data).document
+
+        val scripts = embedDoc.select("script")
+        val flashvarScript = scripts.firstOrNull { it.html().contains("flashvars_") }?.html() ?: return false
+
+        // Use regex to extract the JSON string
+        val regex = """var flashvars = (.*?);""".toRegex(RegexOption.DOT_MATCHES_ALL)
+        val match = regex.find(flashvarScript) ?: return false
+        val jsonStr = match.groupValues[1].trim()
+
+        val flashvars = parseJson<JSONObject>(jsonStr)
+
+        val mediaDefinitions = flashvars.getJSONArray("mediaDefinitions")
+
+        for (i in 0 until mediaDefinitions.length()) {
+            val obj = mediaDefinitions.getJSONObject(i)
+            val format = obj.optString("format")
+            if (format == "mp4") {
+                val qualityStr = obj.optString("quality")
+                val quality = qualityStr.toIntOrNull() ?: continue
+                val videoUrl = obj.optString("videoUrl")
+                if (videoUrl.isNotBlank()) {
+                    callback.invoke(
+                        ExtractorLink(
+                            source = this.name,
+                            name = this.name + " ${qualityStr}p",
+                            url = videoUrl,
+                            referer = iframeSrc,
+                            quality = quality,
+                            type = ExtractorLinkType.VIDEO
+                        )
+                    )
                 }
             }
-            if (url == "") {
-                continue
-            }
-            extlinkList.add(
-                newExtractorLink(
-                    source = name,
-                    name = name,
-                    url = fixUrl(url)
-                ) {
-                    this.referer = data
-                    this.quality = Regex("(\\d+.)").find(quality)?.groupValues?.get(1)
-                        .let { getQualityFromName(it) }
-                }
-            )
         }
-        extlinkList.forEach(callback)
+
         return true
     }
 }
